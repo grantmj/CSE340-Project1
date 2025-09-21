@@ -1,0 +1,14 @@
+TASKS
+1 2
+POLY
+    F1 = x - 2;
+    F2(Y,Z) = (x + 2)(x+2) + 
+
+    (5 + (Y + V)(Y+V) 
+
+    ) + K H I B^2 Z;
+EXECUTE
+    a = F1(2);
+    OUTPUT a;
+INPUTS
+    3 5 6

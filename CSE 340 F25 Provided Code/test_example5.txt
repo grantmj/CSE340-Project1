@@ -1,0 +1,14 @@
+TASKS
+1 2
+POLY
+F = x^2 + 1;
+G(X,Y) = X Y^2 + X Z;
+EXECUTE
+INPUT Z;
+INPUT W;
+X = F(Z);
+Y = G(Z,W);
+OUTPUT X;
+OUTPUT Y;
+INPUTS
+1 2 3 18 19

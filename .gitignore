@@ -1,0 +1,17 @@
+# Compiled executables
+a.out
+parser
+
+# Object files
+*.o
+*.obj
+
+# Debug files
+*.dSYM/
+
+# IDE files
+.vscode/
+.DS_Store
+
+# Test outputs
+test_output/
