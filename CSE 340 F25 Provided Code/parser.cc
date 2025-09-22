@@ -52,6 +52,14 @@ void Parser::parse_program()
     has_semantic_errors = false;
     task_numbers.clear();
     
+    // Initialize Task 2 variables
+    program_statements.clear();
+    symbol_table.clear();
+    memory.clear();
+    input_values.clear();
+    next_input_index = 0;
+    next_memory_location = 0;
+    
     parse_tasks_section();
     parse_poly_section();
     parse_execute_section();
@@ -413,25 +421,72 @@ void Parser::parse_statement()
 void Parser::parse_input_statement()
 {
     expect(INPUT);
-    expect(ID);
+    Token id_token = expect(ID);
     expect(SEMICOLON);
+    
+    // Task 2: Record the INPUT statement
+    Statement stmt;
+    stmt.type = INPUT_STMT;
+    stmt.var_name = id_token.lexeme;
+    stmt.var_location = get_variable_location(id_token.lexeme);
+    stmt.poly_eval = nullptr;
+    program_statements.push_back(stmt);
 }
 
-// output_statement → OUTPUT ID SEMICOLON
+// output_statement → OUTPUT ID SEMICOLON | OUTPUT poly_evaluation SEMICOLON
 void Parser::parse_output_statement()
 {
     expect(OUTPUT);
-    expect(ID);
-    expect(SEMICOLON);
+    
+    // Check if this is a simple ID or a polynomial evaluation
+    Token t1 = lexer.peek(1);
+    Token t2 = lexer.peek(2);
+    
+    if (t1.token_type == ID && t2.token_type == LPAREN) {
+        // This is OUTPUT poly_evaluation SEMICOLON
+        PolyEvaluation* poly_eval = parse_poly_evaluation_return();
+        expect(SEMICOLON);
+        
+        Statement stmt;
+        stmt.type = OUTPUT_STMT;
+        stmt.var_name = "";
+        stmt.var_location = -1;
+        stmt.poly_eval = poly_eval;
+        program_statements.push_back(stmt);
+    } else if (t1.token_type == ID && t2.token_type == SEMICOLON) {
+        // This is OUTPUT ID SEMICOLON
+        Token id_token = expect(ID);
+        expect(SEMICOLON);
+        
+        Statement stmt;
+        stmt.type = OUTPUT_STMT;
+        stmt.var_name = id_token.lexeme;
+        stmt.var_location = get_variable_location(id_token.lexeme);
+        stmt.poly_eval = nullptr;
+        program_statements.push_back(stmt);
+    } else {
+        syntax_error();
+    }
 }
 
 // assign_statement → ID EQUAL poly_evaluation SEMICOLON
 void Parser::parse_assign_statement()
 {
-    expect(ID);
+    Token id_token = expect(ID);
     expect(EQUAL);
-    parse_poly_evaluation();
+    
+    // Parse polynomial evaluation and save for Task 2
+    PolyEvaluation* poly_eval = parse_poly_evaluation_return();
+    
     expect(SEMICOLON);
+    
+    // Task 2: Record the ASSIGN statement
+    Statement stmt;
+    stmt.type = ASSIGN_STMT;
+    stmt.var_name = id_token.lexeme;
+    stmt.var_location = get_variable_location(id_token.lexeme);
+    stmt.poly_eval = poly_eval;
+    program_statements.push_back(stmt);
 }
 
 // poly_evaluation → poly_name LPAREN argument_list RPAREN
@@ -507,7 +562,19 @@ void Parser::parse_argument()
 void Parser::parse_inputs_section()
 {
     expect(INPUTS);
-    parse_num_list();
+    parse_num_list_for_inputs();
+}
+
+// num_list for inputs - stores values for Task 2
+void Parser::parse_num_list_for_inputs()
+{
+    Token num_token = expect(NUM);
+    input_values.push_back(stoi(num_token.lexeme));
+    
+    Token t = lexer.peek(1);
+    if (t.token_type == NUM) {
+        parse_num_list_for_inputs();
+    }
 }
 
 // Semantic checking functions
@@ -605,7 +672,6 @@ PolyDecl* Parser::find_polynomial(const std::string& name)
     return nullptr;
 }
 
-// Task execution functions
 void Parser::execute_tasks()
 {
     // Sort task numbers
@@ -617,7 +683,7 @@ void Parser::execute_tasks()
                 // Task 1 already executed (error checking)
                 break;
             case 2:
-                // Task 2 implementation (later)
+                execute_task2();
                 break;
             case 3:
                 execute_task3();
@@ -726,6 +792,214 @@ void Parser::print_polynomial_with_sorted_monomials(const PolyDecl& poly)
     }
     
     cout << ";" << endl;
+}
+
+// Task 2: Helper functions for program execution
+int Parser::get_variable_location(const std::string& var_name)
+{
+    // Check if variable already has a location
+    auto it = symbol_table.find(var_name);
+    if (it != symbol_table.end()) {
+        return it->second;
+    }
+    
+    // Allocate new location
+    int location = next_memory_location++;
+    symbol_table[var_name] = location;
+    
+    // Ensure memory is large enough
+    if ((int)memory.size() <= location) {
+        memory.resize(location + 1, 0);  // initialize to 0
+    }
+    
+    return location;
+}
+
+PolyEvaluation* Parser::parse_poly_evaluation_return()
+{
+    Token name_token = lexer.peek(1);
+    parse_poly_name();
+    expect(LPAREN);
+    
+    // Create polynomial evaluation structure
+    PolyEvaluation* poly_eval = new PolyEvaluation();
+    poly_eval->poly_name = name_token.lexeme;
+    poly_eval->line_number = name_token.line_no;
+    
+    // Parse and store arguments
+    parse_argument_list_for_evaluation(poly_eval);
+    
+    expect(RPAREN);
+    
+    // Check AUP-13: undeclared polynomial
+    PolyDecl* poly = find_polynomial(name_token.lexeme);
+    if (!poly) {
+        aup13_errors.push_back(name_token.line_no);
+    } else {
+        // Check NA-7: wrong number of arguments
+        if ((int)poly_eval->arguments.size() != (int)poly->params.size()) {
+            na7_errors.push_back(name_token.line_no);
+        }
+    }
+    
+    return poly_eval;
+}
+
+void Parser::parse_argument_list_for_evaluation(PolyEvaluation* poly_eval)
+{
+    parse_argument_for_evaluation(poly_eval);
+    Token t = lexer.peek(1);
+    if (t.token_type == COMMA) {
+        expect(COMMA);
+        parse_argument_list_for_evaluation(poly_eval);
+    }
+}
+
+void Parser::parse_argument_for_evaluation(PolyEvaluation* poly_eval)
+{
+    Token t1 = lexer.peek(1);
+    Argument arg;
+    
+    if (t1.token_type == ID) {
+        Token t2 = lexer.peek(2);
+        if (t2.token_type == LPAREN) {
+            // This is a nested polynomial evaluation
+            arg.type = ARG_POLY;
+            arg.poly_value = parse_poly_evaluation_return();
+        } else {
+            // This is an ID argument
+            Token id_token = expect(ID);
+            arg.type = ARG_ID;
+            arg.id_value = id_token.lexeme;
+        }
+    } else if (t1.token_type == NUM) {
+        // This is a NUM argument
+        Token num_token = expect(NUM);
+        arg.type = ARG_NUM;
+        arg.num_value = stoi(num_token.lexeme);
+    } else {
+        syntax_error();
+    }
+    
+    poly_eval->arguments.push_back(arg);
+}
+
+void Parser::execute_task2()
+{
+    // Initialize memory to sufficient size
+    if (memory.size() < (size_t)next_memory_location) {
+        memory.resize(next_memory_location, 0);
+    }
+    
+    // Execute program statements in order
+    for (const Statement& stmt : program_statements) {
+        switch (stmt.type) {
+            case INPUT_STMT:
+                if (next_input_index < (int)input_values.size()) {
+                    memory[stmt.var_location] = input_values[next_input_index++];
+                }
+                break;
+                
+            case OUTPUT_STMT:
+                if (stmt.poly_eval) {
+                    // OUTPUT with polynomial evaluation
+                    int value = evaluate_polynomial(stmt.poly_eval);
+                    cout << value << endl;
+                } else {
+                    // OUTPUT with simple variable (legacy)
+                    cout << memory[stmt.var_location] << endl;
+                }
+                break;
+                
+            case ASSIGN_STMT:
+                if (stmt.poly_eval) {
+                    int value = evaluate_polynomial(stmt.poly_eval);
+                    memory[stmt.var_location] = value;
+                }
+                break;
+        }
+    }
+}
+
+int Parser::evaluate_polynomial(const PolyEvaluation* poly_eval)
+{
+    // Find the polynomial declaration
+    PolyDecl* poly = find_polynomial(poly_eval->poly_name);
+    if (!poly) {
+        return 0; // Error case, but should have been caught in semantic checking
+    }
+    
+    // Evaluate arguments to get their values
+    std::vector<int> arg_values;
+    
+    for (const Argument& arg : poly_eval->arguments) {
+        switch (arg.type) {
+            case ARG_NUM:
+                arg_values.push_back(arg.num_value);
+                break;
+            case ARG_ID:
+                {
+                    auto it = symbol_table.find(arg.id_value);
+                    if (it != symbol_table.end()) {
+                        arg_values.push_back(memory[it->second]);
+                    } else {
+                        arg_values.push_back(0); // uninitialized variable
+                    }
+                }
+                break;
+            case ARG_POLY:
+                {
+                    int nested_value = evaluate_polynomial(arg.poly_value);
+                    arg_values.push_back(nested_value);
+                }
+                break;
+        }
+    }
+    
+    return evaluate_polynomial_at_values(poly, arg_values);
+}
+
+int Parser::evaluate_polynomial_at_values(const PolyDecl* poly, const std::vector<int>& arg_values)
+{
+    int result = 0;
+    
+    for (const Term& term : poly->body.terms) {
+        int term_value = term.coefficient;
+        
+        // Calculate monomial values
+        for (const Monomial& mono : term.monomials) {
+            // Find which parameter this monomial corresponds to
+            for (int i = 0; i < (int)poly->params.size(); i++) {
+                if (poly->params[i] == mono.var_name) {
+                    if (i < (int)arg_values.size()) {
+                        term_value *= power(arg_values[i], mono.exponent);
+                    }
+                    break;
+                }
+            }
+        }
+        
+        // Apply the term's sign
+        if (term.is_positive) {
+            result += term_value;
+        } else {
+            result -= term_value;
+        }
+    }
+    
+    return result;
+}
+
+int Parser::power(int base, int exponent)
+{
+    if (exponent == 0) return 1;
+    if (exponent == 1) return base;
+    
+    int result = 1;
+    for (int i = 0; i < exponent; i++) {
+        result *= base;
+    }
+    return result;
 }
 
 int main()

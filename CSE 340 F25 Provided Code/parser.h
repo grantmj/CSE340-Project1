@@ -36,6 +36,34 @@ struct PolyDecl {
     PolyBody body; // Add body representation
 };
 
+// Task 2: Data structures for program execution
+enum StatementType { INPUT_STMT, OUTPUT_STMT, ASSIGN_STMT };
+
+// Forward declarations
+struct PolyEvaluation;
+
+enum ArgumentType { ARG_ID, ARG_NUM, ARG_POLY };
+
+struct Argument {
+    ArgumentType type;
+    std::string id_value;      // for ARG_ID
+    int num_value;             // for ARG_NUM  
+    PolyEvaluation* poly_value; // for ARG_POLY
+};
+
+struct PolyEvaluation {
+    std::string poly_name;
+    int line_number;
+    std::vector<Argument> arguments; // arguments in order
+};
+
+struct Statement {
+    StatementType type;
+    std::string var_name;        // for INPUT/OUTPUT statements
+    int var_location;            // memory location of variable
+    PolyEvaluation* poly_eval;   // for ASSIGN statements
+};
+
 class Parser {
   public:
     void parse_program();
@@ -57,6 +85,14 @@ class Parser {
     // Task tracking
     std::vector<int> task_numbers;
     
+    // Task 2: Program execution support
+    std::vector<Statement> program_statements;
+    std::map<std::string, int> symbol_table;  // variable name -> memory location
+    std::vector<int> memory;                  // program memory
+    std::vector<int> input_values;           // input sequence from INPUTS section
+    int next_input_index;                    // current position in input sequence
+    int next_memory_location;                // next available memory location
+    
     // Task 3 specific data
     Term* current_term; // for building terms during parsing
     
@@ -72,6 +108,16 @@ class Parser {
     std::vector<int> convert_to_power_array(const std::vector<Monomial>& monomials, const std::vector<std::string>& params);
     std::string format_monomial_list(const std::vector<int>& power_array, const std::vector<std::string>& params);
     void print_polynomial_with_sorted_monomials(const PolyDecl& poly);
+    
+    // Task 2 functions
+    void execute_task2();
+    int get_variable_location(const std::string& var_name);
+    int evaluate_polynomial(const PolyEvaluation* poly_eval);
+    int evaluate_polynomial_at_values(const PolyDecl* poly, const std::vector<int>& arg_values);
+    int power(int base, int exponent);
+    PolyEvaluation* parse_poly_evaluation_return();
+    void parse_argument_list_for_evaluation(PolyEvaluation* poly_eval);
+    void parse_argument_for_evaluation(PolyEvaluation* poly_eval);
     
     // Parsing functions for each nonterminal
     void parse_tasks_section();
@@ -104,6 +150,7 @@ class Parser {
     int parse_argument_list_count(); // counts arguments while parsing
     void parse_argument();
     void parse_inputs_section();
+    void parse_num_list_for_inputs(); // for storing input values for Task 2
 };
 
 #endif
