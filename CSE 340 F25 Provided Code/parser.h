@@ -12,58 +12,85 @@
 #include <set>
 #include "lexer.h"
 
-struct PolynomialDeclaration {
-    std::string name;
-    std::vector<std::string> parameters;
-    int line_no;
-    bool has_params;
-};
-
-struct PolynomialEvaluation {
-    std::string name;
-    int arg_count;
-    int line_no;
-};
-
-struct VariableUsage {
+// Data structures for polynomial representation
+struct Monomial {
     std::string var_name;
-    int line_no;
-    std::string poly_name;
+    int exponent;
+};
+
+struct Term {
+    int coefficient;
+    std::vector<Monomial> monomials;
+    bool is_positive; // for handling +/- operators
+    bool is_first_term; // to handle printing
+};
+
+struct PolyBody {
+    std::vector<Term> terms;
+};
+
+struct PolyDecl {
+    std::string name;
+    std::vector<std::string> params;
+    int line_number;
+    PolyBody body; // Add body representation
 };
 
 class Parser {
   public:
-    void ParseProgram();
+    void parse_program();
 
   private:
     LexicalAnalyzer lexer;
-    
-    // Data structures for semantic analysis
-    std::vector<PolynomialDeclaration> polynomial_declarations;
-    std::vector<PolynomialEvaluation> polynomial_evaluations;
-    std::vector<VariableUsage> variable_usages;
-    std::vector<int> task_list;
-    
-    // Helper functions
     void syntax_error();
     Token expect(TokenType expected_type);
     
-    // Grammar parsing functions
-    void parse_program();
+    // Data structures for semantic checking
+    std::vector<PolyDecl> polynomials;
+    std::map<std::string, std::vector<int>> duplicate_lines; // name -> line numbers
+    std::vector<int> im4_errors;  // line numbers for IM-4 errors
+    std::vector<int> aup13_errors; // line numbers for AUP-13 errors  
+    std::vector<int> na7_errors;  // line numbers for NA-7 errors
+    PolyDecl* current_poly; // for checking monomial names during body parsing
+    bool has_semantic_errors;
+    
+    // Task tracking
+    std::vector<int> task_numbers;
+    
+    // Task 3 specific data
+    Term* current_term; // for building terms during parsing
+    
+    // Semantic checking functions
+    void check_semantic_errors();
+    void output_semantic_errors();
+    bool is_valid_monomial(const std::string& name);
+    PolyDecl* find_polynomial(const std::string& name);
+    
+    // Task 3 functions
+    void execute_tasks();
+    void execute_task3();
+    std::vector<int> convert_to_power_array(const std::vector<Monomial>& monomials, const std::vector<std::string>& params);
+    std::string format_monomial_list(const std::vector<int>& power_array, const std::vector<std::string>& params);
+    void print_polynomial_with_sorted_monomials(const PolyDecl& poly);
+    
+    // Parsing functions for each nonterminal
     void parse_tasks_section();
     void parse_num_list();
     void parse_poly_section();
     void parse_poly_decl_list();
     void parse_poly_decl();
-    void parse_poly_header(PolynomialDeclaration& poly_decl);
-    void parse_id_list(std::vector<std::string>& params);
-    void parse_poly_body(const std::string& poly_name, const std::vector<std::string>& params);
-    void parse_term_list(const std::string& poly_name, const std::vector<std::string>& params);
-    void parse_term(const std::string& poly_name, const std::vector<std::string>& params);
-    void parse_monomial_list(const std::string& poly_name, const std::vector<std::string>& params);
-    void parse_monomial(const std::string& poly_name, const std::vector<std::string>& params);
+    void parse_poly_header();
+    void parse_id_list();
+    std::vector<std::string> parse_id_list_return(); // returns vector of param names
+    void parse_poly_name();
+    void parse_poly_body();
+    void parse_term_list();
+    void parse_term_list_with_operator(bool is_negative); // helper for handling operators
+    void parse_term();
+    void parse_monomial_list();
+    void parse_monomial();
     void parse_exponent();
-    void parse_parenthesized_list(const std::string& poly_name, const std::vector<std::string>& params);
+    void parse_parenthesized_list();
     void parse_add_operator();
     void parse_coefficient();
     void parse_execute_section();
@@ -73,21 +100,10 @@ class Parser {
     void parse_output_statement();
     void parse_assign_statement();
     void parse_poly_evaluation();
-    void parse_argument_list(int& arg_count);
+    void parse_argument_list();
+    int parse_argument_list_count(); // counts arguments while parsing
     void parse_argument();
     void parse_inputs_section();
-    
-    // Semantic checking functions
-    bool check_semantic_errors();
-    bool check_duplicate_polynomials();
-    bool check_invalid_monomial_names();
-    bool check_undeclared_polynomials();
-    bool check_wrong_argument_count();
-    
-    // Utility functions
-    bool is_task_listed(int task_num);
-    void output_semantic_error(const std::string& error_code, const std::vector<int>& line_numbers);
 };
 
 #endif
-
