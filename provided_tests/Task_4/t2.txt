@@ -1,0 +1,11 @@
+TASKS 
+    1 4
+
+POLY 
+    F(a) = a^2 + (a^3 + 7a^3);
+
+EXECUTE 
+    INPUT x;
+
+INPUTS 
+    1

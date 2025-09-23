@@ -1,0 +1,12 @@
+TASKS 
+    1 3
+
+POLY 
+    F = 5 x;
+    G(x) = 7 x;
+
+EXECUTE 
+    INPUT x; 
+    
+INPUTS 
+    0

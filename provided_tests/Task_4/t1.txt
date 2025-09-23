@@ -1,0 +1,11 @@
+TASKS 
+    1 4
+
+POLY 
+    F(a) = 5a - 3a;
+
+EXECUTE 
+    INPUT x; 
+    
+INPUTS 
+    1

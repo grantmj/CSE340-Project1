@@ -1,0 +1,12 @@
+TASKS
+    1 3
+
+POLY
+    F(x,y) = x^2 x^3 y + 2;
+
+EXECUTE
+    INPUT A;
+    H = F(A,B);
+
+INPUTS
+    3 4 5

@@ -1,0 +1,11 @@
+TASKS 
+    1 4
+
+POLY 
+    F(z,y,x) = x y y  + z^2 x +  x y^2  + x z^2;
+
+EXECUTE 
+    INPUT x;
+
+INPUTS 
+    1

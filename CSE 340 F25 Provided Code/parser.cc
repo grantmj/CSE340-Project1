@@ -952,16 +952,24 @@ void Parser::execute_task_2()
         switch (stmt.type) {
             case STMT_INPUT:
                 if (next_input < (int)inputs.size()) {
-                    memory[stmt.var_index] = inputs[next_input++];
+                    if (stmt.var_index >= 0 && stmt.var_index < (int)memory.size()) {
+                        memory[stmt.var_index] = inputs[next_input++];
+                    }
                 }
                 break;
                 
             case STMT_OUTPUT:
-                std::cout << memory[stmt.var_index] << std::endl;
+                if (stmt.var_index >= 0 && stmt.var_index < (int)memory.size()) {
+                    std::cout << memory[stmt.var_index] << std::endl;
+                } else {
+                    std::cout << 0 << std::endl; // Default for invalid index
+                }
                 break;
                 
             case STMT_ASSIGN:
-                memory[stmt.lhs_index] = evaluate_polynomial(stmt.rhs_eval);
+                if (stmt.lhs_index >= 0 && stmt.lhs_index < (int)memory.size()) {
+                    memory[stmt.lhs_index] = evaluate_polynomial(stmt.rhs_eval);
+                }
                 break;
         }
     }
@@ -979,6 +987,11 @@ int Parser::evaluate_polynomial(const PolyEval* eval)
     std::vector<int> arg_values;
     for (const PolyArgument& arg : eval->args) {
         arg_values.push_back(evaluate_argument(arg));
+    }
+    
+    // Ensure we have the right number of argument values
+    if ((int)arg_values.size() != (int)poly.params.size()) {
+        return 0; // Argument count mismatch - should not happen after semantic checking
     }
     
     // Evaluate polynomial body (term list)

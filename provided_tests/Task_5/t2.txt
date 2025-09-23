@@ -1,0 +1,11 @@
+TASKS
+    1 5
+
+POLY 
+    F(a,b) = (a a + b) (a a + b);
+
+
+EXECUTE
+    INPUT z;
+    
+INPUTS 5

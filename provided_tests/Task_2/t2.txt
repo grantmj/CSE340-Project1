@@ -1,0 +1,17 @@
+TASKS
+    1 2
+
+POLY 
+    F = 500 + (30 + 2);
+    G = 20 - 2;
+
+EXECUTE 
+    a = F(1);
+    b = G(1);
+
+    OUTPUT a;
+    OUTPUT b;
+
+INPUTS 
+    0
+    

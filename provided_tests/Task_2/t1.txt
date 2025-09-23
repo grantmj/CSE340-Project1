@@ -1,0 +1,17 @@
+TASKS
+    1 2
+
+POLY
+    F(X,Y) = 3X^2 + Y^3;
+
+EXECUTE
+    INPUT a;
+    INPUT b;
+
+    c = F(a,b);
+
+    OUTPUT c;
+
+INPUTS
+    2 3 4
+

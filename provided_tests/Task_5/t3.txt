@@ -1,0 +1,12 @@
+TASKS
+    1 5
+
+POLY 
+    F(a) = (1 - 2)(2a)(5a) + (12 - 2)(7);
+
+
+EXECUTE
+    INPUT z;
+
+INPUTS 
+    5
