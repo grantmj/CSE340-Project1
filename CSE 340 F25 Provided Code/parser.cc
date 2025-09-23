@@ -10,7 +10,6 @@
 #include <iostream>
 #include <cstdlib>
 #include <algorithm>
-#include <string>
 #include "parser.h"
 
 using namespace std;
@@ -48,17 +47,20 @@ void Parser::parse_program()
     aup13_errors.clear();
     na7_errors.clear();
     current_poly = nullptr;
-    current_term = nullptr;
     has_semantic_errors = false;
-    task_numbers.clear();
+    
+    // Initialize task execution variables
+    requested_tasks.clear();
+    rich_polynomials.clear();
+    current_rich_poly = nullptr;
     
     // Initialize Task 2 variables
-    program_statements.clear();
+    program.clear();
     symbol_table.clear();
     memory.clear();
-    input_values.clear();
-    next_input_index = 0;
-    next_memory_location = 0;
+    inputs.clear();
+    next_input = 0;
+    next_location = 0;
     
     parse_tasks_section();
     parse_poly_section();
@@ -70,10 +72,11 @@ void Parser::parse_program()
     check_semantic_errors();
     if (has_semantic_errors) {
         output_semantic_errors();
-    } else {
-        // Execute tasks if no errors
-        execute_tasks();
+        return; // Exit if there are semantic errors
     }
+    
+    // If no semantic errors, execute requested tasks
+    execute_tasks();
 }
 
 // tasks_section → TASKS num_list
@@ -88,12 +91,8 @@ void Parser::parse_tasks_section()
 void Parser::parse_num_list()
 {
     Token num_token = expect(NUM);
-    int task_num = stoi(num_token.lexeme);
-    
-    // Add task number if not already present
-    if (find(task_numbers.begin(), task_numbers.end(), task_num) == task_numbers.end()) {
-        task_numbers.push_back(task_num);
-    }
+    int task_num = std::stoi(num_token.lexeme);
+    requested_tasks.insert(task_num); // Store task number (duplicates ignored by set)
     
     Token t = lexer.peek(1);
     if (t.token_type == NUM) {
@@ -124,14 +123,8 @@ void Parser::parse_poly_decl()
 {
     parse_poly_header();
     expect(EQUAL);
-    
-    // Initialize current polynomial's body for parsing
-    current_poly->body.terms.clear();
-    
     parse_poly_body();
     expect(SEMICOLON);
-    
-    current_poly = nullptr; // Clear current poly after parsing
 }
 
 // poly_header → poly_name
@@ -161,6 +154,14 @@ void Parser::parse_poly_header()
     
     polynomials.push_back(poly);
     current_poly = &polynomials.back(); // Set current poly for body parsing
+    
+    // Also create rich polynomial representation
+    RichPolyDecl rich_poly;
+    rich_poly.name = poly.name;
+    rich_poly.params = poly.params;
+    rich_poly.line_number = poly.line_number;
+    rich_polynomials.push_back(rich_poly);
+    current_rich_poly = &rich_polynomials.back();
 }
 
 // id_list → ID
@@ -200,7 +201,12 @@ void Parser::parse_poly_name()
 // poly_body → term_list
 void Parser::parse_poly_body()
 {
-    parse_term_list();
+    if (current_rich_poly) {
+        current_rich_poly->body.clear();
+        parse_rich_term_list(current_rich_poly->body);
+    } else {
+        parse_term_list(); // For semantic checking only
+    }
 }
 
 // term_list → term
@@ -210,54 +216,8 @@ void Parser::parse_term_list()
     parse_term();
     Token t = lexer.peek(1);
     if (t.token_type == PLUS || t.token_type == MINUS) {
-        Token op_token = lexer.GetToken(); // consume operator
-        
-        // Parse remaining terms and apply operator
-        parse_term_list_with_operator(op_token.token_type == MINUS);
-    }
-}
-
-void Parser::parse_term_list_with_operator(bool is_negative)
-{
-    // Parse the next term and apply the operator to it
-    Term term;
-    term.coefficient = 1; // default coefficient
-    term.is_positive = !is_negative; // apply the operator
-    term.monomials.clear();
-    
-    Token t1 = lexer.peek(1);
-    if (t1.token_type == ID) {
-        current_term = &term;
-        parse_monomial_list();
-    } else if (t1.token_type == NUM) {
-        Token coeff_token = expect(NUM);
-        term.coefficient = stoi(coeff_token.lexeme);
-        
-        Token t2 = lexer.peek(1);
-        if (t2.token_type == ID) {
-            current_term = &term;
-            parse_monomial_list();
-        }
-        // else just coefficient case
-    } else if (t1.token_type == LPAREN) {
-        // For now, skip parenthesized lists in Task 3
-        parse_parenthesized_list();
-        return; // Don't add this term yet
-    } else {
-        syntax_error();
-    }
-    
-    // Add the completed term to current polynomial
-    if (current_poly) {
-        current_poly->body.terms.push_back(term);
-    }
-    current_term = nullptr;
-    
-    // Continue parsing if there are more operators
-    Token t = lexer.peek(1);
-    if (t.token_type == PLUS || t.token_type == MINUS) {
-        Token op_token = lexer.GetToken(); // consume operator
-        parse_term_list_with_operator(op_token.token_type == MINUS);
+        parse_add_operator();
+        parse_term_list();
     }
 }
 
@@ -267,39 +227,21 @@ void Parser::parse_term_list_with_operator(bool is_negative)
 // term → parenthesized_list
 void Parser::parse_term()
 {
-    // Create new term
-    Term term;
-    term.coefficient = 1; // default coefficient
-    term.is_positive = true; // will be handled by operator precedence
-    term.monomials.clear();
-    
     Token t1 = lexer.peek(1);
     if (t1.token_type == ID) {
-        current_term = &term;
         parse_monomial_list();
     } else if (t1.token_type == NUM) {
-        Token coeff_token = expect(NUM);
-        term.coefficient = stoi(coeff_token.lexeme);
-        
+        parse_coefficient();
         Token t2 = lexer.peek(1);
         if (t2.token_type == ID) {
-            current_term = &term;
             parse_monomial_list();
         }
         // else just coefficient case
     } else if (t1.token_type == LPAREN) {
-        // For now, skip parenthesized lists in Task 3
         parse_parenthesized_list();
-        return; // Don't add this term yet
     } else {
         syntax_error();
     }
-    
-    // Add the completed term to current polynomial
-    if (current_poly) {
-        current_poly->body.terms.push_back(term);
-    }
-    current_term = nullptr;
 }
 
 // monomial_list → monomial
@@ -324,21 +266,9 @@ void Parser::parse_monomial()
         im4_errors.push_back(id_token.line_no);
     }
     
-    // Create monomial and add to current term
-    Monomial monomial;
-    monomial.var_name = id_token.lexeme;
-    monomial.exponent = 1; // default exponent
-    
     Token t = lexer.peek(1);
     if (t.token_type == POWER) {
-        expect(POWER);
-        Token exp_token = expect(NUM);
-        monomial.exponent = stoi(exp_token.lexeme);
-    }
-    
-    // Add monomial to current term
-    if (current_term) {
-        current_term->monomials.push_back(monomial);
+        parse_exponent();
     }
 }
 
@@ -424,49 +354,25 @@ void Parser::parse_input_statement()
     Token id_token = expect(ID);
     expect(SEMICOLON);
     
-    // Task 2: Record the INPUT statement
+    // Create statement for Task 2
     Statement stmt;
-    stmt.type = INPUT_STMT;
-    stmt.var_name = id_token.lexeme;
-    stmt.var_location = get_variable_location(id_token.lexeme);
-    stmt.poly_eval = nullptr;
-    program_statements.push_back(stmt);
+    stmt.type = STMT_INPUT;
+    stmt.var_index = get_or_create_variable(id_token.lexeme);
+    program.push_back(stmt);
 }
 
-// output_statement → OUTPUT ID SEMICOLON | OUTPUT poly_evaluation SEMICOLON
+// output_statement → OUTPUT ID SEMICOLON
 void Parser::parse_output_statement()
 {
     expect(OUTPUT);
+    Token id_token = expect(ID);
+    expect(SEMICOLON);
     
-    // Check if this is a simple ID or a polynomial evaluation
-    Token t1 = lexer.peek(1);
-    Token t2 = lexer.peek(2);
-    
-    if (t1.token_type == ID && t2.token_type == LPAREN) {
-        // This is OUTPUT poly_evaluation SEMICOLON
-        PolyEvaluation* poly_eval = parse_poly_evaluation_return();
-        expect(SEMICOLON);
-        
-        Statement stmt;
-        stmt.type = OUTPUT_STMT;
-        stmt.var_name = "";
-        stmt.var_location = -1;
-        stmt.poly_eval = poly_eval;
-        program_statements.push_back(stmt);
-    } else if (t1.token_type == ID && t2.token_type == SEMICOLON) {
-        // This is OUTPUT ID SEMICOLON
-        Token id_token = expect(ID);
-        expect(SEMICOLON);
-        
-        Statement stmt;
-        stmt.type = OUTPUT_STMT;
-        stmt.var_name = id_token.lexeme;
-        stmt.var_location = get_variable_location(id_token.lexeme);
-        stmt.poly_eval = nullptr;
-        program_statements.push_back(stmt);
-    } else {
-        syntax_error();
-    }
+    // Create statement for Task 2
+    Statement stmt;
+    stmt.type = STMT_OUTPUT;
+    stmt.var_index = get_or_create_variable(id_token.lexeme);
+    program.push_back(stmt);
 }
 
 // assign_statement → ID EQUAL poly_evaluation SEMICOLON
@@ -475,18 +381,16 @@ void Parser::parse_assign_statement()
     Token id_token = expect(ID);
     expect(EQUAL);
     
-    // Parse polynomial evaluation and save for Task 2
-    PolyEvaluation* poly_eval = parse_poly_evaluation_return();
-    
+    // Parse polynomial evaluation and build representation
+    PolyEval* poly_eval = parse_poly_evaluation_return();
     expect(SEMICOLON);
     
-    // Task 2: Record the ASSIGN statement
+    // Create statement for Task 2
     Statement stmt;
-    stmt.type = ASSIGN_STMT;
-    stmt.var_name = id_token.lexeme;
-    stmt.var_location = get_variable_location(id_token.lexeme);
-    stmt.poly_eval = poly_eval;
-    program_statements.push_back(stmt);
+    stmt.type = STMT_ASSIGN;
+    stmt.lhs_index = get_or_create_variable(id_token.lexeme);
+    stmt.rhs_eval = poly_eval;
+    program.push_back(stmt);
 }
 
 // poly_evaluation → poly_name LPAREN argument_list RPAREN
@@ -562,19 +466,7 @@ void Parser::parse_argument()
 void Parser::parse_inputs_section()
 {
     expect(INPUTS);
-    parse_num_list_for_inputs();
-}
-
-// num_list for inputs - stores values for Task 2
-void Parser::parse_num_list_for_inputs()
-{
-    Token num_token = expect(NUM);
-    input_values.push_back(stoi(num_token.lexeme));
-    
-    Token t = lexer.peek(1);
-    if (t.token_type == NUM) {
-        parse_num_list_for_inputs();
-    }
+    parse_inputs_num_list();
 }
 
 // Semantic checking functions
@@ -672,69 +564,52 @@ PolyDecl* Parser::find_polynomial(const std::string& name)
     return nullptr;
 }
 
+// Task execution functions
 void Parser::execute_tasks()
 {
-    // Sort task numbers
-    sort(task_numbers.begin(), task_numbers.end());
+    // Execute tasks in order: 2, 3, 4, 5 (Task 1 is always executed)
+    if (requested_tasks.count(2)) {
+        execute_task_2();
+    }
     
-    for (int task : task_numbers) {
-        switch (task) {
-            case 1:
-                // Task 1 already executed (error checking)
-                break;
-            case 2:
-                execute_task2();
-                break;
-            case 3:
-                execute_task3();
-                break;
-            case 4:
-                // Task 4 implementation (later)
-                break;
-            case 5:
-                // Task 5 implementation (later)
-                break;
+    if (requested_tasks.count(3)) {
+        execute_task_3();
+    }
+    
+    if (requested_tasks.count(4)) {
+        // TODO: Implement Task 4 - Combine monomial lists
+    }
+    
+    if (requested_tasks.count(5)) {
+        // TODO: Implement Task 5 - Polynomial expansion
+    }
+}
+
+void Parser::execute_task_3()
+{
+    // For now, just output placeholder
+    if (!rich_polynomials.empty()) {
+        cout << "POLY - SORTED MONOMIAL LISTS" << endl;
+        for (const auto& poly : rich_polynomials) {
+            cout << format_poly_decl(poly) << endl;
         }
     }
 }
 
-void Parser::execute_task3()
+// Helper functions for Task 3 - temporary implementations
+std::string Parser::format_monomial_list(const std::vector<int>& powers, const std::vector<std::string>& params)
 {
-    cout << "POLY - SORTED MONOMIAL LISTS" << endl;
-    for (const PolyDecl& poly : polynomials) {
-        print_polynomial_with_sorted_monomials(poly);
-    }
-}
-
-std::vector<int> Parser::convert_to_power_array(const std::vector<Monomial>& monomials, const std::vector<std::string>& params)
-{
-    std::vector<int> power_array(params.size(), 0);
+    std::string result;
+    bool first = true;
     
-    for (const Monomial& mono : monomials) {
-        // Find the position of this variable in the parameter list
-        for (int i = 0; i < (int)params.size(); i++) {
-            if (params[i] == mono.var_name) {
-                power_array[i] += mono.exponent;
-                break;
-            }
-        }
-    }
-    
-    return power_array;
-}
-
-std::string Parser::format_monomial_list(const std::vector<int>& power_array, const std::vector<std::string>& params)
-{
-    std::string result = "";
-    
-    for (int i = 0; i < (int)power_array.size(); i++) {
-        if (power_array[i] > 0) {
-            if (!result.empty()) {
-                result += " ";  // Add space between variables
-            }
+    for (int i = 0; i < (int)powers.size() && i < (int)params.size(); i++) {
+        if (powers[i] > 0) {
+            if (!first) result += " ";
+            first = false;
+            
             result += params[i];
-            if (power_array[i] > 1) {
-                result += "^" + to_string(power_array[i]);
+            if (powers[i] > 1) {
+                result += "^" + std::to_string(powers[i]);
             }
         }
     }
@@ -742,261 +617,452 @@ std::string Parser::format_monomial_list(const std::vector<int>& power_array, co
     return result.empty() ? "1" : result;
 }
 
-void Parser::print_polynomial_with_sorted_monomials(const PolyDecl& poly)
+std::string Parser::format_term(const TermNode& term, const std::vector<std::string>& params, bool is_first)
 {
-    cout << poly.name;
+    std::string result;
     
-    // Print parameter list if not default (no spaces)
-    if (poly.params.size() != 1 || poly.params[0] != "x") {
-        cout << "(";
-        for (int i = 0; i < (int)poly.params.size(); i++) {
-            if (i > 0) cout << ",";
-            cout << poly.params[i];
-        }
-        cout << ")";
+    // Add operator (except for first positive term)
+    if (!is_first) {
+        result += (term.op == OP_PLUS) ? " + " : " - ";
+    } else if (term.op == OP_MINUS) {
+        result += "-";
     }
     
-    cout << " = ";
-    
-    // Process each term
-    for (int term_idx = 0; term_idx < (int)poly.body.terms.size(); term_idx++) {
-        const Term& term = poly.body.terms[term_idx];
-        
-        // Add operator for non-first terms
-        if (term_idx > 0) {
-            if (term.is_positive) {
-                cout << " + ";
-            } else {
-                cout << " - ";
+    if (term.kind == MLIST) {
+        // Add coefficient if not 1 or if it's a constant term
+        bool all_zero = true;
+        for (int power : term.monomial_list) {
+            if (power != 0) {
+                all_zero = false;
+                break;
             }
-        } else if (!term.is_positive) {
-            // Handle negative first term
-            cout << "-";
         }
         
-        // Convert monomials to power array and sort
-        std::vector<int> power_array = convert_to_power_array(term.monomials, poly.params);
-        std::string monomial_str = format_monomial_list(power_array, poly.params);
-        
-        // Print coefficient if not 1, or if it's a constant term
-        // For negative terms, we already printed the minus sign, so use absolute value
-        int display_coeff = term.is_positive ? term.coefficient : term.coefficient;
-        if (display_coeff != 1 || monomial_str == "1") {
-            cout << display_coeff;
+        if (term.coefficient != 1 || all_zero) {
+            result += std::to_string(abs(term.coefficient));
+            if (!all_zero) result += " ";
         }
         
-        // Print monomial list (no space between coefficient and variables)
-        if (monomial_str != "1") {
-            cout << monomial_str;
+        if (!all_zero) {
+            result += format_monomial_list(term.monomial_list, params);
         }
+    } else {
+        // PARENLIST - format parenthesized lists
+        result += format_parenthesized_list(term.parenthesized_list, params);
     }
     
-    cout << ";" << endl;
+    return result;
 }
 
-// Task 2: Helper functions for program execution
-int Parser::get_variable_location(const std::string& var_name)
+std::string Parser::format_poly_decl(const RichPolyDecl& poly)
 {
-    // Check if variable already has a location
-    auto it = symbol_table.find(var_name);
-    if (it != symbol_table.end()) {
-        return it->second;
+    std::string result = poly.name;
+    
+    if (poly.params.size() > 1 || (poly.params.size() == 1 && poly.params[0] != "x")) {
+        result += "(";
+        for (int i = 0; i < (int)poly.params.size(); i++) {
+            if (i > 0) result += ",";
+            result += poly.params[i];
+        }
+        result += ")";
     }
     
-    // Allocate new location
-    int location = next_memory_location++;
-    symbol_table[var_name] = location;
+    result += " = ";
     
-    // Ensure memory is large enough
-    if ((int)memory.size() <= location) {
-        memory.resize(location + 1, 0);  // initialize to 0
+    // Format terms
+    if (!poly.body.empty()) {
+        result += format_term(poly.body[0], poly.params, true);
+        for (int i = 1; i < (int)poly.body.size(); i++) {
+            result += format_term(poly.body[i], poly.params, false);
+        }
+    } else {
+        result += "0"; // Empty polynomial
     }
     
-    return location;
+    return result;
 }
 
-PolyEvaluation* Parser::parse_poly_evaluation_return()
+std::string Parser::format_parenthesized_list(const std::vector<std::vector<TermNode>>& paren_list, const std::vector<std::string>& params)
+{
+    std::string result;
+    
+    // For Task 3, we don't expand parenthesized lists, just format them properly
+    for (size_t i = 0; i < paren_list.size(); i++) {
+        result += "(";
+        
+        const std::vector<TermNode>& term_list = paren_list[i];
+        if (!term_list.empty()) {
+            result += format_term(term_list[0], params, true);
+            for (size_t j = 1; j < term_list.size(); j++) {
+                result += format_term(term_list[j], params, false);
+            }
+        }
+        
+        result += ")";
+    }
+    
+    return result;
+}
+
+// Rich parsing functions - actual implementations
+void Parser::parse_rich_poly_body(std::vector<TermNode>& terms)
+{
+    parse_rich_term_list(terms);
+}
+
+void Parser::parse_rich_term_list(std::vector<TermNode>& terms)
+{
+    // term_list → term
+    // term_list → term add_operator term_list
+    
+    TermNode term;
+    term.op = OP_PLUS; // First term is always positive
+    parse_rich_term(term);
+    terms.push_back(term);
+    
+    Token t = lexer.peek(1);
+    if (t.token_type == PLUS || t.token_type == MINUS) {
+        parse_add_operator(); // Consume the operator
+        
+        // Set up the next term with the operator
+        std::vector<TermNode> rest_terms;
+        parse_rich_term_list(rest_terms);
+        
+        // Set the operator for the first term in rest_terms
+        if (!rest_terms.empty()) {
+            rest_terms[0].op = (t.token_type == PLUS) ? OP_PLUS : OP_MINUS;
+            terms.insert(terms.end(), rest_terms.begin(), rest_terms.end());
+        }
+    }
+}
+
+void Parser::parse_rich_term(TermNode& term)
+{
+    // term → monomial_list
+    // term → coefficient monomial_list  
+    // term → coefficient
+    // term → parenthesized_list
+    
+    term.kind = MLIST;
+    term.coefficient = 1;
+    term.monomial_list.clear();
+    term.monomial_list.resize(current_rich_poly->params.size(), 0);
+    
+    Token t1 = lexer.peek(1);
+    if (t1.token_type == ID) {
+        // monomial_list
+        parse_rich_monomial_list(term.monomial_list);
+    } else if (t1.token_type == NUM) {
+        // coefficient [monomial_list]
+        term.coefficient = parse_rich_coefficient();
+        Token t2 = lexer.peek(1);
+        if (t2.token_type == ID) {
+            parse_rich_monomial_list(term.monomial_list);
+        }
+        // else just coefficient case (monomial_list stays all zeros)
+    } else if (t1.token_type == LPAREN) {
+        // parenthesized_list
+        term.kind = PARENLIST;
+        parse_rich_parenthesized_list(term.parenthesized_list);
+    } else {
+        syntax_error();
+    }
+}
+
+void Parser::parse_rich_monomial_list(std::vector<int>& powers)
+{
+    // monomial_list → monomial
+    // monomial_list → monomial monomial_list
+    
+    // Parse one monomial
+    Token id_token = expect(ID);
+    
+    // Check if this monomial name is valid (IM-4 check)
+    if (current_poly && !is_valid_monomial(id_token.lexeme)) {
+        im4_errors.push_back(id_token.line_no);
+    }
+    
+    // Find the parameter index
+    std::string var_name = id_token.lexeme;
+    int param_index = -1;
+    for (int i = 0; i < (int)current_rich_poly->params.size(); i++) {
+        if (current_rich_poly->params[i] == var_name) {
+            param_index = i;
+            break;
+        }
+    }
+    
+    // Parse optional exponent
+    int exponent = 1;
+    Token t = lexer.peek(1);
+    if (t.token_type == POWER) {
+        expect(POWER);
+        Token exp_token = expect(NUM);
+        exponent = std::stoi(exp_token.lexeme);
+    }
+    
+    // Add to powers array
+    if (param_index >= 0) {
+        powers[param_index] += exponent;
+    }
+    
+    // Check for more monomials
+    t = lexer.peek(1);
+    if (t.token_type == ID) {
+        parse_rich_monomial_list(powers);
+    }
+}
+
+int Parser::parse_rich_coefficient()
+{
+    Token t = expect(NUM);
+    return std::stoi(t.lexeme);
+}
+
+void Parser::parse_rich_parenthesized_list(std::vector<std::vector<TermNode>>& paren_list)
+{
+    // parenthesized_list → LPAREN term_list RPAREN
+    // parenthesized_list → LPAREN term_list RPAREN parenthesized_list
+    
+    expect(LPAREN);
+    std::vector<TermNode> term_list;
+    parse_rich_term_list(term_list);
+    expect(RPAREN);
+    
+    paren_list.push_back(term_list);
+    
+    Token t = lexer.peek(1);
+    if (t.token_type == LPAREN) {
+        parse_rich_parenthesized_list(paren_list);
+    }
+}
+
+void Parser::combine_and_sort_monomials()
+{
+    // Placeholder
+}
+
+void Parser::print_task3_output()
+{
+    // Placeholder
+}
+
+// Task 2 implementation functions
+void Parser::parse_inputs_num_list()
+{
+    Token num_token = expect(NUM);
+    int value = std::stoi(num_token.lexeme);
+    inputs.push_back(value);
+    
+    Token t = lexer.peek(1);
+    if (t.token_type == NUM) {
+        parse_inputs_num_list();
+    }
+}
+
+int Parser::get_or_create_variable(const std::string& name)
+{
+    if (symbol_table.find(name) == symbol_table.end()) {
+        symbol_table[name] = next_location++;
+        memory.resize(next_location, 0); // Initialize to 0
+    }
+    return symbol_table[name];
+}
+
+PolyEval* Parser::parse_poly_evaluation_return()
 {
     Token name_token = lexer.peek(1);
     parse_poly_name();
     expect(LPAREN);
     
-    // Create polynomial evaluation structure
-    PolyEvaluation* poly_eval = new PolyEvaluation();
-    poly_eval->poly_name = name_token.lexeme;
-    poly_eval->line_number = name_token.line_no;
+    // Create evaluation structure
+    PolyEval* eval = new PolyEval();
     
-    // Parse and store arguments
-    parse_argument_list_for_evaluation(poly_eval);
+    // Find polynomial index
+    for (int i = 0; i < (int)rich_polynomials.size(); i++) {
+        if (rich_polynomials[i].name == name_token.lexeme) {
+            eval->poly_index = i;
+            break;
+        }
+    }
+    
+    // Parse arguments
+    parse_argument_list_return(eval->args);
     
     expect(RPAREN);
     
-    // Check AUP-13: undeclared polynomial
+    // Still do semantic checks
     PolyDecl* poly = find_polynomial(name_token.lexeme);
     if (!poly) {
         aup13_errors.push_back(name_token.line_no);
     } else {
-        // Check NA-7: wrong number of arguments
-        if ((int)poly_eval->arguments.size() != (int)poly->params.size()) {
+        if ((int)eval->args.size() != (int)poly->params.size()) {
             na7_errors.push_back(name_token.line_no);
         }
     }
     
-    return poly_eval;
+    return eval;
 }
 
-void Parser::parse_argument_list_for_evaluation(PolyEvaluation* poly_eval)
+void Parser::parse_argument_list_return(std::vector<PolyArgument>& args)
 {
-    parse_argument_for_evaluation(poly_eval);
+    PolyArgument arg = parse_argument_return();
+    args.push_back(arg);
+    
     Token t = lexer.peek(1);
     if (t.token_type == COMMA) {
         expect(COMMA);
-        parse_argument_list_for_evaluation(poly_eval);
+        parse_argument_list_return(args);
     }
 }
 
-void Parser::parse_argument_for_evaluation(PolyEvaluation* poly_eval)
+PolyArgument Parser::parse_argument_return()
 {
-    Token t1 = lexer.peek(1);
-    Argument arg;
+    PolyArgument arg;
     
+    Token t1 = lexer.peek(1);
     if (t1.token_type == ID) {
         Token t2 = lexer.peek(2);
         if (t2.token_type == LPAREN) {
-            // This is a nested polynomial evaluation
-            arg.type = ARG_POLY;
-            arg.poly_value = parse_poly_evaluation_return();
+            // Nested polynomial evaluation
+            arg.kind = ARG_POLYEVAL;
+            arg.poly_eval = parse_poly_evaluation_return();
         } else {
-            // This is an ID argument
+            // Variable ID
             Token id_token = expect(ID);
-            arg.type = ARG_ID;
-            arg.id_value = id_token.lexeme;
+            arg.kind = ARG_ID;
+            arg.var_index = get_or_create_variable(id_token.lexeme);
         }
     } else if (t1.token_type == NUM) {
-        // This is a NUM argument
+        // Numeric constant
         Token num_token = expect(NUM);
-        arg.type = ARG_NUM;
-        arg.num_value = stoi(num_token.lexeme);
+        arg.kind = ARG_NUM;
+        arg.value = std::stoi(num_token.lexeme);
     } else {
         syntax_error();
     }
     
-    poly_eval->arguments.push_back(arg);
+    return arg;
 }
 
-void Parser::execute_task2()
+void Parser::execute_task_2()
 {
-    // Initialize memory to sufficient size
-    if (memory.size() < (size_t)next_memory_location) {
-        memory.resize(next_memory_location, 0);
-    }
-    
-    // Execute program statements in order
-    for (const Statement& stmt : program_statements) {
+    // Execute the program by going through the statement list
+    for (const Statement& stmt : program) {
         switch (stmt.type) {
-            case INPUT_STMT:
-                if (next_input_index < (int)input_values.size()) {
-                    memory[stmt.var_location] = input_values[next_input_index++];
+            case STMT_INPUT:
+                if (next_input < (int)inputs.size()) {
+                    memory[stmt.var_index] = inputs[next_input++];
                 }
                 break;
                 
-            case OUTPUT_STMT:
-                if (stmt.poly_eval) {
-                    // OUTPUT with polynomial evaluation
-                    int value = evaluate_polynomial(stmt.poly_eval);
-                    cout << value << endl;
-                } else {
-                    // OUTPUT with simple variable (legacy)
-                    cout << memory[stmt.var_location] << endl;
-                }
+            case STMT_OUTPUT:
+                std::cout << memory[stmt.var_index] << std::endl;
                 break;
                 
-            case ASSIGN_STMT:
-                if (stmt.poly_eval) {
-                    int value = evaluate_polynomial(stmt.poly_eval);
-                    memory[stmt.var_location] = value;
-                }
+            case STMT_ASSIGN:
+                memory[stmt.lhs_index] = evaluate_polynomial(stmt.rhs_eval);
                 break;
         }
     }
 }
 
-int Parser::evaluate_polynomial(const PolyEvaluation* poly_eval)
+int Parser::evaluate_polynomial(const PolyEval* eval)
 {
-    // Find the polynomial declaration
-    PolyDecl* poly = find_polynomial(poly_eval->poly_name);
-    if (!poly) {
-        return 0; // Error case, but should have been caught in semantic checking
+    if (!eval || eval->poly_index < 0 || eval->poly_index >= (int)rich_polynomials.size()) {
+        return 0; // Error case
     }
     
-    // Evaluate arguments to get their values
+    const RichPolyDecl& poly = rich_polynomials[eval->poly_index];
+    
+    // Evaluate all arguments
     std::vector<int> arg_values;
-    
-    for (const Argument& arg : poly_eval->arguments) {
-        switch (arg.type) {
-            case ARG_NUM:
-                arg_values.push_back(arg.num_value);
-                break;
-            case ARG_ID:
-                {
-                    auto it = symbol_table.find(arg.id_value);
-                    if (it != symbol_table.end()) {
-                        arg_values.push_back(memory[it->second]);
-                    } else {
-                        arg_values.push_back(0); // uninitialized variable
-                    }
-                }
-                break;
-            case ARG_POLY:
-                {
-                    int nested_value = evaluate_polynomial(arg.poly_value);
-                    arg_values.push_back(nested_value);
-                }
-                break;
-        }
+    for (const PolyArgument& arg : eval->args) {
+        arg_values.push_back(evaluate_argument(arg));
     }
     
-    return evaluate_polynomial_at_values(poly, arg_values);
-}
-
-int Parser::evaluate_polynomial_at_values(const PolyDecl* poly, const std::vector<int>& arg_values)
-{
+    // Evaluate polynomial body (term list)
     int result = 0;
+    bool first = true;
     
-    for (const Term& term : poly->body.terms) {
-        int term_value = term.coefficient;
+    for (const TermNode& term : poly.body) {
+        int term_value = evaluate_term(term, arg_values);
         
-        // Calculate monomial values
-        for (const Monomial& mono : term.monomials) {
-            // Find which parameter this monomial corresponds to
-            for (int i = 0; i < (int)poly->params.size(); i++) {
-                if (poly->params[i] == mono.var_name) {
-                    if (i < (int)arg_values.size()) {
-                        term_value *= power(arg_values[i], mono.exponent);
-                    }
-                    break;
-                }
-            }
-        }
-        
-        // Apply the term's sign
-        if (term.is_positive) {
-            result += term_value;
+        if (first) {
+            result = (term.op == OP_MINUS) ? -term_value : term_value;
+            first = false;
         } else {
-            result -= term_value;
+            result += (term.op == OP_PLUS) ? term_value : -term_value;
         }
     }
     
     return result;
 }
 
-int Parser::power(int base, int exponent)
+int Parser::evaluate_argument(const PolyArgument& arg)
 {
-    if (exponent == 0) return 1;
-    if (exponent == 1) return base;
-    
+    switch (arg.kind) {
+        case ARG_NUM:
+            return arg.value;
+            
+        case ARG_ID:
+            if (arg.var_index >= 0 && arg.var_index < (int)memory.size()) {
+                return memory[arg.var_index];
+            }
+            return 0;
+            
+        case ARG_POLYEVAL:
+            return evaluate_polynomial(arg.poly_eval);
+            
+        default:
+            return 0;
+    }
+}
+
+int Parser::evaluate_term(const TermNode& term, const std::vector<int>& arg_values)
+{
+    if (term.kind == MLIST) {
+        // Monomial list term: coefficient * product of variable powers
+        int result = term.coefficient;
+        
+        for (int i = 0; i < (int)term.monomial_list.size() && i < (int)arg_values.size(); i++) {
+            if (term.monomial_list[i] > 0) {
+                result *= int_power(arg_values[i], term.monomial_list[i]);
+            }
+        }
+        
+        return result;
+    } else {
+        // PARENLIST - evaluate each parenthesized term list and multiply them
+        int result = 1;
+        
+        for (const std::vector<TermNode>& term_list : term.parenthesized_list) {
+            // Evaluate this term list
+            int term_list_value = 0;
+            bool first = true;
+            
+            for (const TermNode& inner_term : term_list) {
+                int inner_value = evaluate_term(inner_term, arg_values);
+                
+                if (first) {
+                    term_list_value = (inner_term.op == OP_MINUS) ? -inner_value : inner_value;
+                    first = false;
+                } else {
+                    term_list_value += (inner_term.op == OP_PLUS) ? inner_value : -inner_value;
+                }
+            }
+            
+            result *= term_list_value;
+        }
+        
+        return result;
+    }
+}
+
+int Parser::int_power(int base, int exp)
+{
     int result = 1;
-    for (int i = 0; i < exponent; i++) {
+    for (int i = 0; i < exp; i++) {
         result *= base;
     }
     return result;

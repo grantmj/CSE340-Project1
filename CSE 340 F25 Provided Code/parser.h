@@ -12,56 +12,61 @@
 #include <set>
 #include "lexer.h"
 
-// Data structures for polynomial representation
-struct Monomial {
-    std::string var_name;
-    int exponent;
-};
-
-struct Term {
-    int coefficient;
-    std::vector<Monomial> monomials;
-    bool is_positive; // for handling +/- operators
-    bool is_first_term; // to handle printing
-};
-
-struct PolyBody {
-    std::vector<Term> terms;
-};
-
+// Simple polynomial declaration for semantic checking
 struct PolyDecl {
     std::string name;
     std::vector<std::string> params;
     int line_number;
-    PolyBody body; // Add body representation
 };
 
-// Task 2: Data structures for program execution
-enum StatementType { INPUT_STMT, OUTPUT_STMT, ASSIGN_STMT };
+// Rich data structures for polynomial representation (Task 3+)
+enum TermKind { MLIST, PARENLIST };
+enum OpType { OP_PLUS, OP_MINUS };
 
-// Forward declarations
-struct PolyEvaluation;
+// Data structures for Task 2 (program execution)
+enum StmtType { STMT_INPUT, STMT_OUTPUT, STMT_ASSIGN };
+enum ArgKind { ARG_NUM, ARG_ID, ARG_POLYEVAL };
 
-enum ArgumentType { ARG_ID, ARG_NUM, ARG_POLY };
-
-struct Argument {
-    ArgumentType type;
-    std::string id_value;      // for ARG_ID
-    int num_value;             // for ARG_NUM  
-    PolyEvaluation* poly_value; // for ARG_POLY
+struct PolyArgument {
+    ArgKind kind;
+    int value;          // for ARG_NUM
+    int var_index;      // for ARG_ID
+    struct PolyEval* poly_eval; // for ARG_POLYEVAL
+    
+    PolyArgument() : kind(ARG_NUM), value(0), var_index(-1), poly_eval(nullptr) {}
 };
 
-struct PolyEvaluation {
-    std::string poly_name;
-    int line_number;
-    std::vector<Argument> arguments; // arguments in order
+struct PolyEval {
+    int poly_index;                  // index into rich_polynomials
+    std::vector<PolyArgument> args;
+    
+    PolyEval() : poly_index(-1) {}
 };
 
 struct Statement {
-    StatementType type;
-    std::string var_name;        // for INPUT/OUTPUT statements
-    int var_location;            // memory location of variable
-    PolyEvaluation* poly_eval;   // for ASSIGN statements
+    StmtType type;
+    int var_index;      // for INPUT/OUTPUT: variable location
+    int lhs_index;      // for ASSIGN: LHS variable location
+    PolyEval* rhs_eval; // for ASSIGN: RHS polynomial evaluation
+    
+    Statement() : type(STMT_INPUT), var_index(-1), lhs_index(-1), rhs_eval(nullptr) {}
+};
+
+struct TermNode {
+    TermKind kind;                     // MLIST or PARENLIST
+    OpType op;                         // operator preceding this term
+    int coefficient;                   // only for MLIST (default 1)
+    std::vector<int> monomial_list;    // only for MLIST (powers aligned to params)
+    std::vector<std::vector<TermNode>> parenthesized_list; // only for PARENLIST
+    
+    TermNode() : kind(MLIST), op(OP_PLUS), coefficient(1) {}
+};
+
+struct RichPolyDecl {
+    std::string name;
+    std::vector<std::string> params;
+    std::vector<TermNode> body;
+    int line_number;
 };
 
 class Parser {
@@ -73,6 +78,9 @@ class Parser {
     void syntax_error();
     Token expect(TokenType expected_type);
     
+    // Task tracking
+    std::set<int> requested_tasks;
+    
     // Data structures for semantic checking
     std::vector<PolyDecl> polynomials;
     std::map<std::string, std::vector<int>> duplicate_lines; // name -> line numbers
@@ -82,19 +90,17 @@ class Parser {
     PolyDecl* current_poly; // for checking monomial names during body parsing
     bool has_semantic_errors;
     
-    // Task tracking
-    std::vector<int> task_numbers;
+    // Rich polynomial representation for Task 3+
+    std::vector<RichPolyDecl> rich_polynomials;
+    RichPolyDecl* current_rich_poly;
     
-    // Task 2: Program execution support
-    std::vector<Statement> program_statements;
-    std::map<std::string, int> symbol_table;  // variable name -> memory location
-    std::vector<int> memory;                  // program memory
-    std::vector<int> input_values;           // input sequence from INPUTS section
-    int next_input_index;                    // current position in input sequence
-    int next_memory_location;                // next available memory location
-    
-    // Task 3 specific data
-    Term* current_term; // for building terms during parsing
+    // Task 2 - Program execution data structures
+    std::vector<Statement> program;           // list of statements to execute
+    std::map<std::string, int> symbol_table;  // variable name -> memory index
+    std::vector<int> memory;                  // memory for variables (mem[])
+    std::vector<int> inputs;                  // input values from INPUTS section
+    int next_input;                           // index of next input to read
+    int next_location;                        // next available memory location
     
     // Semantic checking functions
     void check_semantic_errors();
@@ -102,26 +108,25 @@ class Parser {
     bool is_valid_monomial(const std::string& name);
     PolyDecl* find_polynomial(const std::string& name);
     
-    // Task 3 functions
+    // Task execution functions
     void execute_tasks();
-    void execute_task3();
-    std::vector<int> convert_to_power_array(const std::vector<Monomial>& monomials, const std::vector<std::string>& params);
-    std::string format_monomial_list(const std::vector<int>& power_array, const std::vector<std::string>& params);
-    void print_polynomial_with_sorted_monomials(const PolyDecl& poly);
+    void execute_task_2(); // Program execution
+    void execute_task_3(); // Sort and combine monomials
     
-    // Task 2 functions
-    void execute_task2();
-    int get_variable_location(const std::string& var_name);
-    int evaluate_polynomial(const PolyEvaluation* poly_eval);
-    int evaluate_polynomial_at_values(const PolyDecl* poly, const std::vector<int>& arg_values);
-    int power(int base, int exponent);
-    PolyEvaluation* parse_poly_evaluation_return();
-    void parse_argument_list_for_evaluation(PolyEvaluation* poly_eval);
-    void parse_argument_for_evaluation(PolyEvaluation* poly_eval);
+    // Task 2 helper functions
+    int get_or_create_variable(const std::string& name);
+    int evaluate_polynomial(const PolyEval* eval);
+    int evaluate_argument(const PolyArgument& arg);
+    int evaluate_term(const TermNode& term, const std::vector<int>& arg_values);
+    int int_power(int base, int exp);
+    PolyEval* parse_poly_evaluation_return();
+    PolyArgument parse_argument_return();
+    void parse_argument_list_return(std::vector<PolyArgument>& args);
     
     // Parsing functions for each nonterminal
     void parse_tasks_section();
     void parse_num_list();
+    void parse_inputs_num_list(); // separate function for INPUTS section
     void parse_poly_section();
     void parse_poly_decl_list();
     void parse_poly_decl();
@@ -131,7 +136,6 @@ class Parser {
     void parse_poly_name();
     void parse_poly_body();
     void parse_term_list();
-    void parse_term_list_with_operator(bool is_negative); // helper for handling operators
     void parse_term();
     void parse_monomial_list();
     void parse_monomial();
@@ -150,7 +154,22 @@ class Parser {
     int parse_argument_list_count(); // counts arguments while parsing
     void parse_argument();
     void parse_inputs_section();
-    void parse_num_list_for_inputs(); // for storing input values for Task 2
+    
+    // Rich parsing functions for Tasks 3+
+    void parse_rich_poly_body(std::vector<TermNode>& terms);
+    void parse_rich_term_list(std::vector<TermNode>& terms);
+    void parse_rich_term(TermNode& term);
+    void parse_rich_monomial_list(std::vector<int>& powers);
+    int parse_rich_coefficient();
+    void parse_rich_parenthesized_list(std::vector<std::vector<TermNode>>& paren_list);
+    
+    // Helper functions for Task 3
+    void combine_and_sort_monomials();
+    void print_task3_output();
+    std::string format_monomial_list(const std::vector<int>& powers, const std::vector<std::string>& params);
+    std::string format_term(const TermNode& term, const std::vector<std::string>& params, bool is_first);
+    std::string format_poly_decl(const RichPolyDecl& poly);
+    std::string format_parenthesized_list(const std::vector<std::vector<TermNode>>& paren_list, const std::vector<std::string>& params);
 };
 
 #endif
