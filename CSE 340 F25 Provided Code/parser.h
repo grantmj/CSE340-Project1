@@ -134,6 +134,8 @@ class Parser {
     std::vector<TermNode> expand_polynomial(const std::vector<TermNode>& terms, const std::vector<std::string>& params);
     std::vector<TermNode> expand_parenthesized_term(const TermNode& paren_term, const std::vector<std::string>& params);
     std::vector<TermNode> multiply_term_lists(const std::vector<TermNode>& list1, const std::vector<TermNode>& list2, const std::vector<std::string>& params);
+    void sort_terms(std::vector<TermNode>& terms, const std::vector<std::string>& params);
+    bool term_less_than(const TermNode& a, const TermNode& b, const std::vector<std::string>& params);
     
     // Parsing functions for each nonterminal
     void parse_tasks_section();

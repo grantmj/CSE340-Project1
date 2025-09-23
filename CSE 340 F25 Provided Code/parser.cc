@@ -626,7 +626,7 @@ std::string Parser::format_term(const TermNode& term, const std::vector<std::str
     if (!is_first) {
         result += (term.op == OP_PLUS) ? " + " : " - ";
     } else if (term.op == OP_MINUS) {
-        result += "-";
+        result += "- ";
     }
     
     if (term.kind == MLIST) {
@@ -1160,11 +1160,24 @@ std::vector<TermNode> Parser::combine_identical_monomials(const std::vector<Term
         }
     }
     
-    // Remove terms with coefficient 0
-    result.erase(std::remove_if(result.begin(), result.end(), 
+    // Remove terms with coefficient 0, but keep at least one zero term if result would be empty
+    auto new_end = std::remove_if(result.begin(), result.end(), 
         [](const TermNode& term) { 
             return term.kind == MLIST && term.coefficient == 0; 
-        }), result.end());
+        });
+    
+    // If removing zero terms would make result empty, add a single zero constant term
+    if (new_end == result.begin()) {
+        TermNode zero_term;
+        zero_term.kind = MLIST;
+        zero_term.op = OP_PLUS;
+        zero_term.coefficient = 0;
+        zero_term.monomial_list.resize(params.size(), 0); // All zeros = constant term
+        result.clear();
+        result.push_back(zero_term);
+    } else {
+        result.erase(new_end, result.end());
+    }
     
     return result;
 }
@@ -1212,15 +1225,21 @@ std::vector<TermNode> Parser::expand_polynomial(const std::vector<TermNode>& ter
         if (term.kind == MLIST) {
             // Regular monomial list - just add it
             expanded_terms.push_back(term);
-        } else {
+        } else if (term.kind == PARENLIST) {
             // PARENLIST - expand it
             std::vector<TermNode> expanded_paren = expand_parenthesized_term(term, params);
             expanded_terms.insert(expanded_terms.end(), expanded_paren.begin(), expanded_paren.end());
         }
+        // Skip any unknown term kinds
     }
     
     // Combine like terms after expansion
-    return combine_identical_monomials(expanded_terms, params);
+    std::vector<TermNode> combined = combine_identical_monomials(expanded_terms, params);
+    
+    // Sort the terms to ensure consistent ordering
+    sort_terms(combined, params);
+    
+    return combined;
 }
 
 std::vector<TermNode> Parser::expand_parenthesized_term(const TermNode& paren_term, const std::vector<std::string>& params)
@@ -1231,20 +1250,49 @@ std::vector<TermNode> Parser::expand_parenthesized_term(const TermNode& paren_te
         return result;
     }
     
-    // Start with the first parenthesized list
-    std::vector<TermNode> current_expansion = paren_term.parenthesized_list[0];
+    // First, recursively expand each parenthesized list
+    std::vector<std::vector<TermNode>> expanded_lists;
+    for (const auto& paren_list : paren_term.parenthesized_list) {
+        std::vector<TermNode> expanded_list;
+        for (const auto& term : paren_list) {
+            if (term.kind == PARENLIST) {
+                // Recursively expand nested parentheses
+                std::vector<TermNode> nested_expansion = expand_parenthesized_term(term, params);
+                expanded_list.insert(expanded_list.end(), nested_expansion.begin(), nested_expansion.end());
+            } else {
+                expanded_list.push_back(term);
+            }
+        }
+        expanded_lists.push_back(expanded_list);
+    }
     
-    // Multiply by each subsequent parenthesized list
-    for (size_t i = 1; i < paren_term.parenthesized_list.size(); i++) {
-        current_expansion = multiply_term_lists(current_expansion, paren_term.parenthesized_list[i], params);
+    // Now multiply all the expanded lists together
+    std::vector<TermNode> current_expansion = expanded_lists[0];
+    for (size_t i = 1; i < expanded_lists.size(); i++) {
+        current_expansion = multiply_term_lists(current_expansion, expanded_lists[i], params);
     }
     
     // Apply the operator and coefficient of the parenthesized term
     for (auto& term : current_expansion) {
         if (term.kind == MLIST) {
-            term.coefficient *= paren_term.coefficient;
+            // Handle coefficient multiplication
+            int original_coeff = term.coefficient;
+            if (term.op == OP_MINUS) {
+                original_coeff = -original_coeff;
+            }
+            
+            int final_coeff = original_coeff * paren_term.coefficient;
             if (paren_term.op == OP_MINUS) {
-                term.coefficient = -term.coefficient;
+                final_coeff = -final_coeff;
+            }
+            
+            // Set the final sign and coefficient
+            if (final_coeff >= 0) {
+                term.coefficient = final_coeff;
+                term.op = OP_PLUS;
+            } else {
+                term.coefficient = -final_coeff;
+                term.op = OP_MINUS;
             }
         }
     }
@@ -1263,7 +1311,7 @@ std::vector<TermNode> Parser::multiply_term_lists(const std::vector<TermNode>& l
                 product.kind = MLIST;
                 product.op = OP_PLUS; // We'll handle signs later
                 
-                // Multiply coefficients
+                // Multiply coefficients with proper sign handling
                 int coeff1 = term1.coefficient;
                 if (term1.op == OP_MINUS) coeff1 = -coeff1;
                 
@@ -1272,7 +1320,11 @@ std::vector<TermNode> Parser::multiply_term_lists(const std::vector<TermNode>& l
                 
                 int product_coeff = coeff1 * coeff2;
                 
-                if (product_coeff >= 0) {
+                // Handle the case where product is zero
+                if (product_coeff == 0) {
+                    product.coefficient = 0;
+                    product.op = OP_PLUS;
+                } else if (product_coeff > 0) {
                     product.coefficient = product_coeff;
                     product.op = OP_PLUS;
                 } else {
@@ -1295,6 +1347,40 @@ std::vector<TermNode> Parser::multiply_term_lists(const std::vector<TermNode>& l
     }
     
     return result;
+}
+
+void Parser::sort_terms(std::vector<TermNode>& terms, const std::vector<std::string>& params)
+{
+    // Sort terms by their monomial signature for consistent ordering
+    std::sort(terms.begin(), terms.end(), [this, &params](const TermNode& a, const TermNode& b) {
+        return term_less_than(a, b, params);
+    });
+}
+
+bool Parser::term_less_than(const TermNode& a, const TermNode& b, const std::vector<std::string>& params)
+{
+    if (a.kind != MLIST || b.kind != MLIST) {
+        return false; // Don't sort non-MLIST terms
+    }
+    
+    // Compare by total degree first (sum of all powers)
+    int degree_a = 0, degree_b = 0;
+    for (int power : a.monomial_list) degree_a += power;
+    for (int power : b.monomial_list) degree_b += power;
+    
+    if (degree_a != degree_b) {
+        return degree_a > degree_b; // Higher degree terms first
+    }
+    
+    // If same total degree, compare lexicographically by individual powers
+    size_t min_size = std::min(a.monomial_list.size(), b.monomial_list.size());
+    for (size_t i = 0; i < min_size; i++) {
+        if (a.monomial_list[i] != b.monomial_list[i]) {
+            return a.monomial_list[i] > b.monomial_list[i]; // Higher power first
+        }
+    }
+    
+    return a.monomial_list.size() < b.monomial_list.size();
 }
 
 int main()
