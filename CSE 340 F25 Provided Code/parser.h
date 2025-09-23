@@ -67,6 +67,7 @@ struct RichPolyDecl {
     std::vector<std::string> params;
     std::vector<TermNode> body;
     int line_number;
+    bool has_explicit_params;  // true if parameters were explicitly specified with parentheses
 };
 
 class Parser {
@@ -112,6 +113,8 @@ class Parser {
     void execute_tasks();
     void execute_task_2(); // Program execution
     void execute_task_3(); // Sort and combine monomials
+    void execute_task_4(); // Combine identical monomial lists
+    void execute_task_5(); // Polynomial expansion and simplification
     
     // Task 2 helper functions
     int get_or_create_variable(const std::string& name);
@@ -122,6 +125,15 @@ class Parser {
     PolyEval* parse_poly_evaluation_return();
     PolyArgument parse_argument_return();
     void parse_argument_list_return(std::vector<PolyArgument>& args);
+    
+    // Task 4 helper functions
+    std::vector<TermNode> combine_identical_monomials(const std::vector<TermNode>& terms, const std::vector<std::string>& params);
+    bool monomials_are_identical(const std::vector<int>& mono1, const std::vector<int>& mono2);
+    
+    // Task 5 helper functions
+    std::vector<TermNode> expand_polynomial(const std::vector<TermNode>& terms, const std::vector<std::string>& params);
+    std::vector<TermNode> expand_parenthesized_term(const TermNode& paren_term, const std::vector<std::string>& params);
+    std::vector<TermNode> multiply_term_lists(const std::vector<TermNode>& list1, const std::vector<TermNode>& list2, const std::vector<std::string>& params);
     
     // Parsing functions for each nonterminal
     void parse_tasks_section();

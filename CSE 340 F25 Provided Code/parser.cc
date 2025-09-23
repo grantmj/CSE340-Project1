@@ -160,6 +160,7 @@ void Parser::parse_poly_header()
     rich_poly.name = poly.name;
     rich_poly.params = poly.params;
     rich_poly.line_number = poly.line_number;
+    rich_poly.has_explicit_params = (t.token_type == LPAREN);  // was there an explicit param list?
     rich_polynomials.push_back(rich_poly);
     current_rich_poly = &rich_polynomials.back();
 }
@@ -577,11 +578,11 @@ void Parser::execute_tasks()
     }
     
     if (requested_tasks.count(4)) {
-        // TODO: Implement Task 4 - Combine monomial lists
+        execute_task_4();
     }
     
     if (requested_tasks.count(5)) {
-        // TODO: Implement Task 5 - Polynomial expansion
+        execute_task_5();
     }
 }
 
@@ -591,7 +592,7 @@ void Parser::execute_task_3()
     if (!rich_polynomials.empty()) {
         cout << "POLY - SORTED MONOMIAL LISTS" << endl;
         for (const auto& poly : rich_polynomials) {
-            cout << format_poly_decl(poly) << endl;
+            cout << "\t" << format_poly_decl(poly) << ";" << endl;
         }
     }
 }
@@ -658,7 +659,10 @@ std::string Parser::format_poly_decl(const RichPolyDecl& poly)
 {
     std::string result = poly.name;
     
-    if (poly.params.size() > 1 || (poly.params.size() == 1 && poly.params[0] != "x")) {
+    // Show parameters if: 
+    // 1. More than one parameter, OR
+    // 2. Explicitly specified parameter list (even if it's just "x")
+    if (poly.params.size() > 1 || poly.has_explicit_params) {
         result += "(";
         for (int i = 0; i < (int)poly.params.size(); i++) {
             if (i > 0) result += ",";
@@ -951,10 +955,12 @@ void Parser::execute_task_2()
     for (const Statement& stmt : program) {
         switch (stmt.type) {
             case STMT_INPUT:
-                if (next_input < (int)inputs.size()) {
-                    if (stmt.var_index >= 0 && stmt.var_index < (int)memory.size()) {
-                        memory[stmt.var_index] = inputs[next_input++];
+                if (stmt.var_index >= 0 && stmt.var_index < (int)memory.size()) {
+                    if (next_input < (int)inputs.size()) {
+                        memory[stmt.var_index] = inputs[next_input];
                     }
+                    // Always increment next_input, even if no more inputs available
+                    next_input++;
                 }
                 break;
                 
@@ -1078,6 +1084,216 @@ int Parser::int_power(int base, int exp)
     for (int i = 0; i < exp; i++) {
         result *= base;
     }
+    return result;
+}
+
+void Parser::execute_task_4()
+{
+    if (!rich_polynomials.empty()) {
+        cout << "POLY - COMBINED MONOMIAL LISTS" << endl;
+        
+        // Create a copy of polynomials and combine identical monomial lists
+        std::vector<RichPolyDecl> combined_polynomials;
+        
+        for (const auto& poly : rich_polynomials) {
+            RichPolyDecl combined_poly = poly;
+            combined_poly.body = combine_identical_monomials(poly.body, poly.params);
+            combined_polynomials.push_back(combined_poly);
+        }
+        
+        for (const auto& poly : combined_polynomials) {
+            cout << "\t" << format_poly_decl(poly) << ";" << endl;
+        }
+    }
+}
+
+std::vector<TermNode> Parser::combine_identical_monomials(const std::vector<TermNode>& terms, const std::vector<std::string>& params)
+{
+    std::vector<TermNode> result;
+    
+    for (const auto& term : terms) {
+        if (term.kind == MLIST) {
+            // Find if we already have a term with identical monomial list
+            bool found = false;
+            for (auto& existing : result) {
+                if (existing.kind == MLIST && 
+                    monomials_are_identical(existing.monomial_list, term.monomial_list)) {
+                    
+                    // Combine coefficients, considering the sign
+                    int term_coeff = term.coefficient;
+                    if (term.op == OP_MINUS) {
+                        term_coeff = -term_coeff;
+                    }
+                    
+                    int existing_coeff = existing.coefficient;
+                    if (existing.op == OP_MINUS) {
+                        existing_coeff = -existing_coeff;
+                    }
+                    
+                    int combined_coeff = existing_coeff + term_coeff;
+                    
+                    // Update the existing term with combined coefficient
+                    if (combined_coeff >= 0) {
+                        existing.coefficient = combined_coeff;
+                        existing.op = OP_PLUS;
+                    } else {
+                        existing.coefficient = -combined_coeff;
+                        existing.op = OP_MINUS;
+                    }
+                    
+                    found = true;
+                    break;
+                }
+            }
+            
+            if (!found) {
+                // Add this term as a new entry
+                result.push_back(term);
+            }
+        } else {
+            // PARENLIST - recursively combine terms within each parenthesized list
+            TermNode combined_term = term;
+            for (auto& paren_list : combined_term.parenthesized_list) {
+                paren_list = combine_identical_monomials(paren_list, params);
+            }
+            result.push_back(combined_term);
+        }
+    }
+    
+    // Remove terms with coefficient 0
+    result.erase(std::remove_if(result.begin(), result.end(), 
+        [](const TermNode& term) { 
+            return term.kind == MLIST && term.coefficient == 0; 
+        }), result.end());
+    
+    return result;
+}
+
+bool Parser::monomials_are_identical(const std::vector<int>& mono1, const std::vector<int>& mono2)
+{
+    if (mono1.size() != mono2.size()) {
+        return false;
+    }
+    
+    for (size_t i = 0; i < mono1.size(); i++) {
+        if (mono1[i] != mono2[i]) {
+            return false;
+        }
+    }
+    
+    return true;
+}
+
+void Parser::execute_task_5()
+{
+    if (!rich_polynomials.empty()) {
+        cout << "POLY - EXPANDED" << endl;
+        
+        // Create expanded polynomials
+        std::vector<RichPolyDecl> expanded_polynomials;
+        
+        for (const auto& poly : rich_polynomials) {
+            RichPolyDecl expanded_poly = poly;
+            expanded_poly.body = expand_polynomial(poly.body, poly.params);
+            expanded_polynomials.push_back(expanded_poly);
+        }
+        
+        for (const auto& poly : expanded_polynomials) {
+            cout << "\t" << format_poly_decl(poly) << ";" << endl;
+        }
+    }
+}
+
+std::vector<TermNode> Parser::expand_polynomial(const std::vector<TermNode>& terms, const std::vector<std::string>& params)
+{
+    std::vector<TermNode> expanded_terms;
+    
+    for (const auto& term : terms) {
+        if (term.kind == MLIST) {
+            // Regular monomial list - just add it
+            expanded_terms.push_back(term);
+        } else {
+            // PARENLIST - expand it
+            std::vector<TermNode> expanded_paren = expand_parenthesized_term(term, params);
+            expanded_terms.insert(expanded_terms.end(), expanded_paren.begin(), expanded_paren.end());
+        }
+    }
+    
+    // Combine like terms after expansion
+    return combine_identical_monomials(expanded_terms, params);
+}
+
+std::vector<TermNode> Parser::expand_parenthesized_term(const TermNode& paren_term, const std::vector<std::string>& params)
+{
+    std::vector<TermNode> result;
+    
+    if (paren_term.parenthesized_list.empty()) {
+        return result;
+    }
+    
+    // Start with the first parenthesized list
+    std::vector<TermNode> current_expansion = paren_term.parenthesized_list[0];
+    
+    // Multiply by each subsequent parenthesized list
+    for (size_t i = 1; i < paren_term.parenthesized_list.size(); i++) {
+        current_expansion = multiply_term_lists(current_expansion, paren_term.parenthesized_list[i], params);
+    }
+    
+    // Apply the operator and coefficient of the parenthesized term
+    for (auto& term : current_expansion) {
+        if (term.kind == MLIST) {
+            term.coefficient *= paren_term.coefficient;
+            if (paren_term.op == OP_MINUS) {
+                term.coefficient = -term.coefficient;
+            }
+        }
+    }
+    
+    return current_expansion;
+}
+
+std::vector<TermNode> Parser::multiply_term_lists(const std::vector<TermNode>& list1, const std::vector<TermNode>& list2, const std::vector<std::string>& params)
+{
+    std::vector<TermNode> result;
+    
+    for (const auto& term1 : list1) {
+        for (const auto& term2 : list2) {
+            if (term1.kind == MLIST && term2.kind == MLIST) {
+                TermNode product;
+                product.kind = MLIST;
+                product.op = OP_PLUS; // We'll handle signs later
+                
+                // Multiply coefficients
+                int coeff1 = term1.coefficient;
+                if (term1.op == OP_MINUS) coeff1 = -coeff1;
+                
+                int coeff2 = term2.coefficient;
+                if (term2.op == OP_MINUS) coeff2 = -coeff2;
+                
+                int product_coeff = coeff1 * coeff2;
+                
+                if (product_coeff >= 0) {
+                    product.coefficient = product_coeff;
+                    product.op = OP_PLUS;
+                } else {
+                    product.coefficient = -product_coeff;
+                    product.op = OP_MINUS;
+                }
+                
+                // Add powers for each parameter
+                product.monomial_list.resize(params.size(), 0);
+                for (size_t i = 0; i < params.size() && i < term1.monomial_list.size(); i++) {
+                    product.monomial_list[i] += term1.monomial_list[i];
+                }
+                for (size_t i = 0; i < params.size() && i < term2.monomial_list.size(); i++) {
+                    product.monomial_list[i] += term2.monomial_list[i];
+                }
+                
+                result.push_back(product);
+            }
+        }
+    }
+    
     return result;
 }
 
