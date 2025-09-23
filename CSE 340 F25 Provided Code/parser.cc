@@ -841,16 +841,6 @@ void Parser::parse_rich_parenthesized_list(std::vector<std::vector<TermNode>>& p
     }
 }
 
-void Parser::combine_and_sort_monomials()
-{
-    // Placeholder
-}
-
-void Parser::print_task3_output()
-{
-    // Placeholder
-}
-
 // Task 2 implementation functions
 void Parser::parse_inputs_num_list()
 {
